@@ -114,18 +114,20 @@ def run_migrations() -> None:
             else:
                 conn.execute(text("INSERT OR IGNORE INTO categorias_gasto (nombre) VALUES (:n)"), {"n": cat})
 
-        # factura_seq: inicializar con MAX(numero) existente, mínimo 10249 (como Rust)
+        # factura_seq: inicializar fila única (numeración F-XXXXX). Idempotente.
         from db_utils import scalar_max
 
-        conn.execute(
-            text(
-                "INSERT INTO factura_seq (id, counter) "
-                "SELECT 1, COALESCE(MAX(CAST(SUBSTR(COALESCE(NULLIF(numero, ''), 'F-0'), 3) AS INTEGER)), 10249) "
-                "FROM facturas WHERE NOT EXISTS (SELECT 1 FROM factura_seq)"
+        if IS_POSTGRES:
+            conn.execute(
+                text("INSERT INTO factura_seq (id, counter) VALUES (1, 10249) ON CONFLICT (id) DO NOTHING")
             )
-        )
+        else:
+            conn.execute(text("INSERT OR IGNORE INTO factura_seq (id, counter) VALUES (1, 10249)"))
+        max_numero = conn.execute(
+            text("SELECT MAX(CAST(SUBSTR(COALESCE(NULLIF(numero, ''), 'F-0'), 3) AS INTEGER)) FROM facturas")
+        ).scalar()
         conn.execute(
-            text(f"UPDATE factura_seq SET counter = {scalar_max('counter', '10249')} WHERE id = 1")
+            text(f"UPDATE factura_seq SET counter = {scalar_max('counter', '10249', str(max_numero or 0))} WHERE id = 1")
         )
 
     print("[migrations] OK")

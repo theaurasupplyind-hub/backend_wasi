@@ -9,11 +9,11 @@ from sqlalchemy import text
 from database import IS_POSTGRES
 
 
-def scalar_max(a: str, b: str) -> str:
-    """Devuelve la expresión SQL de máximo escalar entre a y b."""
+def scalar_max(*args: str) -> str:
+    """Máximo escalar de N expresiones: GREATEST(a,b,...) en Postgres, MAX(a,b,...) en SQLite."""
     if IS_POSTGRES:
-        return f"GREATEST({a}, {b})"
-    return f"MAX({a}, {b})"
+        return f"GREATEST({', '.join(args)})"
+    return f"MAX({', '.join(args)})"
 
 
 def exec_insert(db, table: str, columns, values, returning_id: bool = True) -> int | None:
