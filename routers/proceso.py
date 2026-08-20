@@ -25,12 +25,13 @@ def _get_ordenes(db, estado: str) -> list:
     ]
 
 
-def _get_facturas(db, where_clause: str) -> list:
+def _get_facturas(db, where_clause: str, limit: int = 500) -> list:
     rows = db.execute(
         text(
             f"SELECT f.id, f.numero, f.fecha, f.cliente_nombre, f.total, f.estado, f.entrega_estado "
-            f"FROM facturas f WHERE {where_clause} ORDER BY f.id DESC LIMIT 500"
-        )
+            f"FROM facturas f WHERE {where_clause} ORDER BY f.id DESC LIMIT :limit"
+        ),
+        {"limit": limit},
     ).fetchall()
     if not rows:
         return []
@@ -75,11 +76,29 @@ def _get_facturas(db, where_clause: str) -> list:
     return facturas
 
 
+def _get_ordenes_huerfanas(db) -> list:
+    rows = db.execute(
+        text(
+            "SELECT op.id, op.fecha, op.numero_factura, op.cliente_nombre, op.detalle, op.cantidad_pedida, "
+            "op.stock_disponible, op.cantidad_a_producir, op.estado, op.notas "
+            "FROM ordenes_produccion op "
+            "LEFT JOIN facturas f ON f.numero = op.numero_factura "
+            "WHERE f.id IS NULL ORDER BY op.id"
+        )
+    ).fetchall()
+    return [
+        {"id": r[0], "fecha": r[1], "numero_factura": r[2], "cliente_nombre": r[3], "detalle": r[4],
+         "cantidad_pedida": r[5], "stock_disponible": r[6], "cantidad_a_producir": r[7], "estado": r[8], "notas": r[9]}
+        for r in rows
+    ]
+
+
 @router.get("/kanban")
 def get_proceso_kanban(db: Session = Depends(get_db)):
     return {
         "pedidos": _get_ordenes(db, "Pendiente"),
         "en_proceso": _get_ordenes(db, "En proceso"),
         "listo": _get_facturas(db, "f.entrega_estado != 'Entregado'"),
-        "entregado": _get_facturas(db, "f.entrega_estado = 'Entregado'"),
+        "entregado": _get_facturas(db, "f.entrega_estado = 'Entregado'", limit=30),
+        "ordenes_huerfanas": _get_ordenes_huerfanas(db),
     }

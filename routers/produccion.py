@@ -158,3 +158,46 @@ def delete_orden_produccion(orden_id: int, db: Session = Depends(get_db)):
     db.execute(text("DELETE FROM ordenes_produccion WHERE id = :id"), {"id": orden_id})
     db.commit()
     return {"status": "ok"}
+
+
+class OrphanedEliminarBody(BaseModel):
+    motivo: str = ""
+
+
+@router.get("/orphaned")
+def get_ordenes_huerfanas(db: Session = Depends(get_db)):
+    rows = db.execute(
+        text(
+            "SELECT op.id, op.fecha, op.numero_factura, op.cliente_nombre, op.detalle, "
+            "op.cantidad_pedida, op.stock_disponible, op.cantidad_a_producir, op.estado, op.notas "
+            "FROM ordenes_produccion op "
+            "LEFT JOIN facturas f ON f.numero = op.numero_factura "
+            "WHERE f.id IS NULL ORDER BY op.id"
+        )
+    ).fetchall()
+    return [
+        {"id": r[0], "fecha": r[1], "numero_factura": r[2], "cliente_nombre": r[3], "detalle": r[4],
+         "cantidad_pedida": r[5], "stock_disponible": r[6], "cantidad_a_producir": r[7], "estado": r[8], "notas": r[9]}
+        for r in rows
+    ]
+
+
+@router.delete("/orphaned")
+def eliminar_ordenes_huerfanas(data: OrphanedEliminarBody, db: Session = Depends(get_db)):
+    result = db.execute(
+        text(
+            "DELETE FROM ordenes_produccion WHERE numero_factura NOT IN "
+            "(SELECT numero FROM facturas)"
+        )
+    )
+    deleted = result.rowcount or 0
+    motivo = (data.motivo or "").strip()
+    if deleted > 0:
+        registrar_actividad(
+            db,
+            "ordenes_huerfanas_eliminadas",
+            f"Eliminadas {deleted} órdenes huérfanas" + (f" ({motivo})" if motivo else ""),
+            "limpieza",
+        )
+    db.commit()
+    return {"status": "ok", "deleted": deleted}
