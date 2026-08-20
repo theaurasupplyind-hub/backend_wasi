@@ -1,6 +1,6 @@
 """Router /proceso — port de commands/proceso.rs (kanban)."""
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -32,28 +32,46 @@ def _get_facturas(db, where_clause: str) -> list:
             f"FROM facturas f WHERE {where_clause} ORDER BY f.id DESC LIMIT 500"
         )
     ).fetchall()
-    facturas = []
-    for r in rows:
-        factura_id, numero, fecha, cliente_nombre, total, estado, entrega_estado = r
-        items = db.execute(
-            text("SELECT id, cantidad, detalle FROM factura_items WHERE factura_id = :id"), {"id": factura_id}
-        ).fetchall()
-        lineas = db.execute(
-            text(
-                "SELECT id, detalle, cantidad_a_producir, estado "
-                "FROM ordenes_produccion WHERE numero_factura = :n"
-            ),
-            {"n": numero},
-        ).fetchall()
-        facturas.append({
-            "id": factura_id, "numero": numero, "fecha": fecha, "cliente_nombre": cliente_nombre,
-            "total": total, "estado": estado, "entrega_estado": entrega_estado,
-            "items": [{"id": it[0], "cantidad": it[1], "detalle": it[2]} for it in items],
-            "lineas_produccion": [
-                {"orden_id": ln[0], "detalle": ln[1], "cantidad_a_producir": ln[2], "estado": ln[3]}
-                for ln in lineas
-            ],
-        })
+    if not rows:
+        return []
+    facturas = [
+        {"id": r[0], "numero": r[1], "fecha": r[2], "cliente_nombre": r[3],
+         "total": r[4], "estado": r[5], "entrega_estado": r[6],
+         "items": [], "lineas_produccion": []}
+        for r in rows
+    ]
+    ids = [f["id"] for f in facturas]
+    numeros = [f["numero"] for f in facturas]
+
+    items_rows = db.execute(
+        text(
+            "SELECT factura_id, id, cantidad, detalle FROM factura_items "
+            "WHERE factura_id IN :ids"
+        ).bindparams(bindparam("ids", expanding=True)),
+        {"ids": ids},
+    ).fetchall()
+    items_by_factura: dict[int, list] = {}
+    for factura_id, item_id, cantidad, detalle in items_rows:
+        items_by_factura.setdefault(factura_id, []).append(
+            {"id": item_id, "cantidad": cantidad, "detalle": detalle}
+        )
+
+    lineas_rows = db.execute(
+        text(
+            "SELECT numero_factura, id, detalle, cantidad_a_producir, estado "
+            "FROM ordenes_produccion WHERE numero_factura IN :numeros"
+        ).bindparams(bindparam("numeros", expanding=True)),
+        {"numeros": numeros},
+    ).fetchall()
+    lineas_by_numero: dict[str, list] = {}
+    for numero, orden_id, detalle, cap, estado in lineas_rows:
+        lineas_by_numero.setdefault(numero, []).append(
+            {"orden_id": orden_id, "detalle": detalle, "cantidad_a_producir": cap, "estado": estado}
+        )
+
+    for f in facturas:
+        f["items"] = items_by_factura.get(f["id"], [])
+        f["lineas_produccion"] = lineas_by_numero.get(f["numero"], [])
     return facturas
 
 

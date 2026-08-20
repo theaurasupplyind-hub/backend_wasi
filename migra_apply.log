@@ -1,0 +1,31 @@
+Origen: D:\jesus\Documents\Desarrollo\WasiV2\base de datos a migrar\wasi.db
+[migrations] OK
+  clientes: 30 filas
+  facturas: 78 filas
+  factura_items: 583 filas
+  stock_reservado -> stock_reservado_factura: 18 productos
+  productos: 242 filas
+  cuenta_corriente: 178 filas
+  movimientos_wasi: 249 filas
+  entidades_gastos: 29 filas
+  movimientos_gastos: 256 filas
+  ordenes_produccion: 266 filas
+  empleados_config: 6 filas
+  asistencia_empleados: 152 filas
+  actividad_reciente: 488 filas
+  pagos_proveedores: 0 filas
+  maquinas: 5 filas
+  produccion_maquina: 251 filas
+  notas_maquina: 0 filas
+  cerrado_maquinas: 2 filas
+  cerrado_notas: 0 filas
+  cerrado_medias: 17 filas
+  embolsado_empleados: 0 filas
+  embolsado_notas: 0 filas
+  embolsado_docenas: 0 filas
+  categorias_gasto: 26 personalizadas mergeadas
+  stock_movements: 743 filas
+  costos_medias: no hay JSON local, se omite
+  factura_seq normalizada a 1 fila
+  Verificación: OK — sin discrepancias
+Migración finalizada.

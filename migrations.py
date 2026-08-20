@@ -60,6 +60,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_cc_cliente_id ON cuenta_corriente(cliente_id)",
     "CREATE INDEX IF NOT EXISTS idx_facturas_estado ON facturas(estado)",
     "CREATE INDEX IF NOT EXISTS idx_facturas_fecha ON facturas(fecha)",
+    "CREATE INDEX IF NOT EXISTS idx_facturas_entrega_estado ON facturas(entrega_estado)",
     "CREATE INDEX IF NOT EXISTS idx_fi_factura_id ON factura_items(factura_id)",
     "CREATE INDEX IF NOT EXISTS idx_mg_entidad_id ON movimientos_gastos(entidad_id)",
     "CREATE INDEX IF NOT EXISTS idx_op_estado ON ordenes_produccion(estado)",

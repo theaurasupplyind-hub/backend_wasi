@@ -399,7 +399,7 @@ def _ajustar_stock_inner(db, prod_id: int, delta: float) -> float:
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("")
-def get_facturas(limit: int, offset: int, search: str, db: Session = Depends(get_db)):
+def get_facturas(limit: int, offset: int, search: str = "", db: Session = Depends(get_db)):
     base = f"SELECT {FACTURA_COLS} FROM facturas f WHERE 1=1"
     params = {"limit": limit, "offset": offset}
     if search:

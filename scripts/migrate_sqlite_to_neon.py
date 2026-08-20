@@ -41,7 +41,9 @@ def default_source() -> str:
 
 
 def source_conn(source: str) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+    # Conexión plana (no URI): soporta rutas Windows con espacios/backslashes.
+    # El script solo LEE del origen; nunca escribe sobre él.
+    return sqlite3.connect(source)
 
 
 def target_columns(db, table: str) -> list[str]:
@@ -95,6 +97,34 @@ def reset_sequences(db, table: str) -> None:
             f"(SELECT COALESCE(MAX(id), 1) FROM {table}))"
         )
     )
+
+
+def migrate_stock_reservado(src: sqlite3.Connection, db, dry_run: bool) -> int:
+    """Mapea la columna antigua productos.stock_reservado (una sola, app Python)
+    al esquema destino: stock_reservado_factura = stock_reservado y
+    stock_reservado_produccion = 0.
+
+    Precedente del propio proyecto (WassiApp/WassiDB database.py).
+    """
+    src_cols = {c[1] for c in src.execute('PRAGMA table_info("productos")')}
+    if "stock_reservado" not in src_cols:
+        return 0
+    rows = src.execute("SELECT id, COALESCE(stock_reservado, 0) FROM productos").fetchall()
+    if dry_run:
+        n = sum(1 for _, v in rows if v != 0)
+        print(f"  stock_reservado -> stock_reservado_factura: {n} productos (dry-run)")
+        return n
+    for pid, value in rows:
+        db.execute(
+            text(
+                "UPDATE productos SET stock_reservado_factura = :v, stock_reservado_produccion = 0 "
+                "WHERE id = :id"
+            ),
+            {"v": value, "id": pid},
+        )
+    n = sum(1 for _, v in rows if v != 0)
+    print(f"  stock_reservado -> stock_reservado_factura: {n} productos")
+    return n
 
 
 def set_factura_seq(db) -> None:
@@ -208,11 +238,47 @@ def verify(src: sqlite3.Connection, db) -> list[str]:
     t_stock = db.execute(text("SELECT COALESCE(SUM(stock_actual),0) FROM productos")).scalar() or 0.0
     if abs(s_stock - t_stock) > 0.01:
         issues.append(f"SUM stock: origen={s_stock} destino={t_stock}")
+    s_res = {r[0]: r[1] for r in src.execute("SELECT id, COALESCE(stock_reservado,0) FROM productos")}
+    t_res = {r[0]: r[1] for r in db.execute(text("SELECT id, stock_reservado_factura FROM productos")).fetchall()}
+    bad_res = [pid for pid, v in s_res.items() if abs(v - t_res.get(pid, -1)) > 0.01]
+    prod_res_prod = db.execute(
+        text("SELECT COUNT(*) FROM productos WHERE stock_reservado_produccion != 0")
+    ).scalar() or 0
+    if bad_res:
+        issues.append(f"stock_reservado mapeo: {len(bad_res)} productos difieren (ej: {bad_res[:5]})")
+    if prod_res_prod:
+        issues.append(f"stock_reservado_produccion debe ser 0 tras migrar (hay {prod_res_prod})")
     s_mw = src.execute("SELECT COALESCE(SUM(CASE WHEN tipo='Ingreso' THEN monto ELSE 0 END),0) - COALESCE(SUM(CASE WHEN tipo='Egreso' THEN monto ELSE 0 END),0) FROM movimientos_wasi").fetchone()[0]
     t_mw = db.execute(text("SELECT COALESCE(SUM(CASE WHEN tipo='Ingreso' THEN monto ELSE 0 END),0) - COALESCE(SUM(CASE WHEN tipo='Egreso' THEN monto ELSE 0 END),0) FROM movimientos_wasi")).scalar() or 0.0
     if abs(s_mw - t_mw) > 0.01:
         issues.append(f"SALDO WASI: origen={s_mw} destino={t_mw}")
     return issues
+
+
+def migrate_categorias(src: sqlite3.Connection, db, dry_run: bool) -> int:
+    """Merge de categorías: conserva los seeds (insertados por run_migrations)
+    y agrega las categorías personalizadas del origen por nombre (sin conservar
+    ids, para no colisionar con los seeds)."""
+    rows = src.execute("SELECT nombre FROM categorias_gasto").fetchall()
+    nombres = [r[0] for r in rows if r[0] and r[0].strip()]
+    if dry_run:
+        print(f"  categorias_gasto: {len(nombres)} personalizadas a merge (dry-run)")
+        return len(nombres)
+    inserted = 0
+    for nombre in nombres:
+        try:
+            db.execute(
+                text(
+                    "INSERT INTO categorias_gasto (nombre) VALUES (:n) "
+                    "ON CONFLICT (nombre) DO NOTHING"
+                ),
+                {"n": nombre},
+            )
+            inserted += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"  [warn] categorias_gasto: '{nombre}' omitida: {exc}")
+    print(f"  categorias_gasto: {inserted} personalizadas mergeadas")
+    return inserted
 
 
 def main() -> None:
@@ -241,9 +307,15 @@ def main() -> None:
                     continue
                 if table in SIN_IDS:
                     continue
-                if table == "categorias_gasto" and args.apply:
-                    db.execute(text("DELETE FROM categorias_gasto"))
+                if table == "categorias_gasto":
+                    migrate_categorias(src, db, dry_run=not args.apply)
+                    if not args.apply:
+                        continue
+                    reset_sequences(db, table)
+                    continue
                 n = copy_rows(src, db, table, dry_run=not args.apply)
+                if table == "productos":
+                    migrate_stock_reservado(src, db, dry_run=not args.apply)
                 if not args.apply:
                     print(f"  {table}: {n} filas (dry-run)")
                     continue
